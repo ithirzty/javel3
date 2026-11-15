@@ -1,0 +1,18 @@
+#import "../javel3.bah"
+
+main(args []str) int {
+
+    server = javel3 {
+        port: 8080
+        routes: []javel3_route* {
+            new javel3_route {
+                path: "/"
+                base: "./pages"
+            }
+        }
+    }
+    
+    server.launch()
+    
+    return 0
+}

@@ -1,0 +1,26 @@
+#import "http.bah"
+
+#define javel3_defaultError(rp ptr, code int, req http_request*, resp http_response*)
+#define javel3_serveFile(pr ptr, req http_request*, resp http_response*)
+
+struct javel3_route {
+    base: str
+    path: str
+    cacheMaxAge: int = -1
+    disableParsing: bool
+    handle: function(javel3_route*, http_request*, http_response*) = javel3_serveFile
+    error: function(javel3_route*, int, http_request*, http_response*) = javel3_defaultError
+    server: http_server*
+
+    match(r http_request*) int {
+        if len(r.path) < len(this.path) {
+            return 0
+        }
+
+        if strHasPrefix(r.path, this.path) {
+            return len(this.path)
+        }
+
+        return 0
+    }
+}

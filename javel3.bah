@@ -1,0 +1,319 @@
+#import "http.bah"
+#import "string.bah"
+#import "json.bah"
+#import "jit.bah"
+
+#import "src/route.bah"
+#import "src/handlers.bah"
+#import "src/streams.bah"
+#import "src/path.bah"
+#import "src/wrappers.bah"
+
+#define javel3_defaultError(rp ptr, code int, req http_request*, resp http_response*)
+#define javel3_serveFile(pr ptr, req http_request*, resp http_response*)
+#define javel3_streamHandle(pr ptr, req http_request*, resp http_response*)
+
+struct javel3 extend http_server {
+    certFile: str
+    keyFile: str
+    routes: []javel3_route*
+
+    //internal use
+    templatesLock: mutex
+    templates: []javel3_template*
+    clientsMutex: mutex
+    clients: []javel3_streamClient*
+
+    getEventClient(key str) javel3_streamClient* {
+        this.clientsMutex.lock()
+        i=0; for i < len(this.clients), i++ {
+            if this.clients[i].key == key {
+                client = this.clients[i]
+                this.clientsMutex.unlock()
+                return client
+            }
+        }
+        this.clientsMutex.unlock()
+        return null
+    }
+
+    newStreamClient() javel3_streamClient* {
+        this.clientsMutex.lock()
+        client = new javel3_streamClient
+        this.clients[len(this.clients)] = client
+        this.clientsMutex.unlock()
+        return client
+    }
+
+    removeStreamClient(client javel3_streamClient*) {
+        this.clientsMutex.lock()
+        i=0; for i < len(this.clients), i++ {
+            if client == this.clients[i] {
+                this.clients[i].channel.destroy()
+                this.clients[i].mut.destroy()
+                delete(this.clients, i)
+                break
+            }
+        }
+        this.clientsMutex.unlock()
+    }
+
+    selectRoute(req http_request*, resp http_response*) {
+        if len(this.routes) == 0 {
+            return
+        }
+
+        best = this.routes[0]
+        score = best.match(req)
+
+        i=0; for i < len(this.routes), i++ {
+            rc = this.routes[i].match(req)
+            if rc > score {
+                score = rc
+                best = this.routes[i]
+            }
+        }
+
+        if best.cacheMaxAge != -1 {
+            resp.setHeader("Cache-Control", "max-age="+intToStr(best.cacheMaxAge))
+        }
+        best.handle(req, resp)
+    }
+
+    _init() {
+        this.handle = this.selectRoute
+    }
+
+    launch() {
+        this.routes[len(this.routes)] = new javel3_route {
+            path: "/__JAVEL/"
+            handle: <ptr>javel3_streamHandle
+        }
+
+        i=0; for i < len(this.routes), i++ {
+            this.routes[i].server = this
+        }
+
+        this.templatesLock.init()
+        this.clientsMutex.init()
+
+        if this.portTLS != 0 {
+            async this.listenAndServe()
+            this.listenAndServeTLS(this.certFile, this.keyFile)
+        } else {
+            this.listenAndServe()
+        }
+
+        this.templatesLock.destroy()
+        this.clientsMutex.destroy()
+    }
+
+}
+
+__javel3_findTemplate(server javel3*, file []byte, path str, req http_request*) javel3_template* {
+    fileMod = getLastModified(path)
+
+    template = <javel3_template*>null
+    server.templatesLock.lock()
+    i=0; for i < len(server.templates), i++ {
+        if server.templates[i].filePath == path {
+            template = server.templates[i]
+            if template.lastMod != fileMod {
+                template.parse(file, path)
+            }
+            break
+        }
+    }
+
+    if template == null {
+        template = new javel3_template {
+            server: server
+        }
+        template.parse(file, path)
+        server.templates[len(server.templates)] = template
+    }
+
+    server.templatesLock.unlock()
+
+    return template
+}
+
+javel3_streamHandle(r javel3_route*, req http_request*, resp http_response*) {
+    client = (<javel3*>r.server).getEventClient(req.getCookie("javel-stream-key"))
+
+    if client == null {
+        resp.code = 400
+        resp.write("Malformed request.")
+        resp.send()
+        return
+    }
+
+    if req.path == "/__JAVEL/triggerBlock" {
+        method = req.body.str()
+
+        if len(method) == 0 {
+            resp.write("No method provided.")
+            resp.code = 400
+            resp.send()
+            return
+        }
+
+        if client.jitObj.call(method, null) == false {
+            resp.write("Unknown method.")
+            resp.code = 404
+            resp.send()
+            return
+        }
+
+        resp.write("")
+        resp.send()
+        return
+    }
+
+    if req.path == "/__JAVEL/triggerBlockWithArg" {
+        body = req.body.str()
+        method = ""
+        args jsonElement*
+
+        i=0; for i < len(body) - 1, i++ {
+            if body[i] == '&' {
+                method = body[:i]
+                args = parseJson(body[i+1:])
+                break
+            }
+        }
+
+        if len(method) == 0 {
+            resp.write("No method provided.")
+            resp.code = 400
+            resp.send()
+            return
+        }
+
+        fn bahFunction*
+        i=0; for i < len(client.jitObj.functions), i++ {
+            fn = client.jitObj.functions[i]
+            if fn.name == method {
+                break
+            }
+        }
+
+        if i == len(client.jitObj.functions) {
+            resp.write("Unknown method.")
+            resp.code = 404
+            resp.send()
+            return
+        }
+
+
+        buffSize = 0
+        nbArgs = 0
+        currArg = fn.type.child
+        for currArg != null, currArg = currArg.next {
+            buffSize += currArg.size
+            nbArgs++
+        }
+
+        if args == null || nbArgs != len(args.children) {
+            resp.write("Wrong argument number.")
+            resp.code = 404
+            resp.send()
+            return
+        }
+
+        buff = memoryAlloc(buffSize)
+        i=0
+        offset = 0
+        currArg = fn.type.child
+        for currArg != null, currArg = currArg.next {
+            arg = args.children[i]
+            reflectElem = jitReflect(currArg)
+            val = <ptr>(<uint>buff + offset)
+            if currArg.type == BAH_TYPE_STR {
+                reflectElem.type = "str*"
+            }
+            reflectElem.value = val
+            arg.scan(*reflectElem)
+            i++
+            offset += currArg.size
+        }
+
+        if client.jitObj.call(method, buff) == false {
+            resp.write("Unknown method.")
+            resp.code = 404
+            resp.send()
+            return
+        }
+        
+        resp.write("")
+        resp.send()
+        return
+    }
+
+    if req.path == "/__JAVEL/stream" {
+
+        resp.setHeader("Content-type", "text/event-stream")
+        resp.setHeader("X-Accel-Buffering", "no")
+        resp.write("\n\n")
+        resp.send()
+
+        client.mut.lock()
+        client.active = true
+        client.mut.unlock()
+
+        for true {
+            evt = <str>client.channel.receiveTimedout(5000000000)
+
+            if <ptr>evt == null {
+                if resp.flush(strToArr("event:ping\ndata:{\"time\":"+uintToStr(getTimeUnix())+"}\n\n")) == false {
+                    break
+                }
+                continue
+            }
+
+            if resp.flush(strToArr(evt)) == false {
+                break
+            }
+        }
+        client.mut.lock()
+        client.active = false
+        client.jitObj.close()
+        client.mut.unlock()
+        (<javel3*>r.server).removeStreamClient(client)
+    }
+}
+
+__javel3_abstract_newClient(s javel3*) javel3_streamClient* {
+    return s.newStreamClient()
+}
+
+__javel3_clientConnectionCooldown(server javel3*, client javel3_streamClient*) {
+    sleep(5)
+    client.mut.lock()
+    if client.active == false {
+        client.jitObj.close()
+        client.mut.unlock()
+        server.removeStreamClient(client)
+        return
+    }
+    client.mut.unlock()
+}
+
+__javel3_segfaultHandle(sig int32, info ptr, ctx ptr) {
+    threadNb = currentThread()
+    println("[javel3] Caught memory error in thread: "+uintToHex(threadNb))
+    backtrace(0)
+
+    pthread_exit(<ptr>1)
+}
+
+_initSgf() {
+    action = sigaction{
+        sa_handler: __javel3_segfaultHandle
+        sa_flags: SA_SIGINFO
+    }
+    sigaction(SIGSEGV, &action, null)
+    sigaction(SIGFPE, &action, null)
+}
+
+#init _initSgf()

@@ -1,0 +1,59 @@
+#import "iostream.bah"
+#import "jit.bah"
+#import "rand.bah"
+#import "json.bah"
+
+__javel3_makeToken() str {
+    n uint
+    fs = fileStream{}
+    fs.open("/dev/urandom", "r")
+    fs.readPtr(&n, 8)
+    fs.close()
+    
+    token = strBuilder{}
+    seedRandom(n)
+
+    i=0; for i < 64, i++ {
+        type = randomInRange(0, 4)
+
+        c char
+        if type == 1 {
+            c = <char>randomInRange(<int>'0', <int>'9')
+        } else if type == 2 {
+            c = <char>randomInRange(<int>'a', <int>'z')
+        } else {
+            c = <char>randomInRange(<int>'A', <int>'Z')
+        }
+        token.append(c)
+    }
+
+    return token.str()
+}
+
+struct javel3_streamClient {
+    key: str
+    channel: channel*
+    mut: mutex
+    jitObj: jitObject
+    active: bool
+
+    _init() {
+        this.key = __javel3_makeToken()
+        this.mut.init()
+        this.channel = channel()
+    }
+
+    send(e reflectElement) {
+        this.channel.send("event: "+e.type+"\ndata:"+toJson(e)+"\n\n")
+    }
+}
+
+struct javel3_streamMessageEvaluate {
+    code: str
+}
+
+__javel3_eval_func(cli javel3_streamClient*, s str) {
+    cli.send(javel3_streamMessageEvaluate{
+        code: s
+    })
+}

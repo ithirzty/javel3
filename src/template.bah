@@ -1,0 +1,338 @@
+#import "iostream.bah"
+#import "html.bah"
+#import "http.bah"
+#import "string.bah"
+#import "time.bah"
+#import "jit.bah"
+
+#import "./streams.bah"
+
+#define __javel3_abstract_newClient(s http_server*) javel3_streamClient*
+
+const JAVEL3_templateTypeBytes   = 0
+const JAVEL3_templateTypeCode    = 1
+
+const __javel3_clientScriptInjection = "function __bah_trigger_block_arg(e,a){fetch(window.location.origin+\"/__JAVEL/triggerBlockWithArg\",{method:\"POST\",body:e+\"&\"+JSON.stringify(a),credentials:\"same-origin\"})}function __bah_trigger_block(e,a){fetch(window.location.origin+\"/__JAVEL/triggerBlock\",{method:\"POST\",body:e,credentials:\"same-origin\"})}let __javel_es=new EventSource(window.origin+\"/__JAVEL/stream\");__javel_es.addEventListener(\"javel3_streamMessageEvaluate\",ev=>{let data=JSON.parse(ev.data);eval(data.code)});let bah = {};"
+
+struct javel3_templateElement {
+    contents: ptr
+    next: javel3_templateElement*
+
+    type: byte
+}
+
+#define __javel3_constructHtmlTemplate(elem htmlElement*, functionsCalled []str, allCode str, template ptr, lastElement javel3_templateElement*) [str, javel3_templateElement*]
+
+
+#define __javel3_clientConnectionCooldown(server http_server*, client javel3_streamClient*)
+
+struct javel3_template {
+    filePath: str
+    lastMod: uint
+    server: http_server*
+
+    body: javel3_templateElement*
+    jitObj: jitObject
+    hasCode: bool
+
+    cleanup() {
+        if len(this.jitObj.filePath) != 0 {
+            this.jitObj.close()
+        }
+    }
+    
+    parse(bytes []byte, filePath str) {
+        this.cleanup()
+        
+        blockNb = 0
+
+        this.filePath = filePath
+        this.lastMod = getLastModified(filePath)
+
+        lastElement = <javel3_templateElement*>null
+
+        allCode = ""
+
+        doc = parseHTML(arrToStr(bytes))
+        functionsCalled = []str
+
+        i=0; for i < len(doc.children), i++ {
+            res = __javel3_constructHtmlTemplate(doc.children[i], functionsCalled, allCode, this, null)
+            allCode = res[0]
+            lastElement = res[1]
+        }
+
+        if lastElement == null {
+            this.body = new javel3_templateElement {
+                type: JAVEL3_templateTypeBytes
+            }
+            lastElement = this.body
+            bytes = []byte
+            lastElement.contents = bytes
+        } else if lastElement.type != JAVEL3_templateTypeBytes {
+            lastElement.next = new javel3_templateElement {
+                type: JAVEL3_templateTypeBytes
+            }
+            lastElement = lastElement.next
+            bytes = []byte
+            lastElement.contents = bytes
+        }
+
+        bytes = <[]byte>lastElement.contents
+
+        i=0; for i < len("<script>"), i++ {
+            bytes[len(bytes)] = "<script>"[i]
+        }
+
+        i=0; for i < len(__javel3_clientScriptInjection), i++ {
+            bytes[len(bytes)] = __javel3_clientScriptInjection[i]
+        }
+
+        j=0; for j < len(functionsCalled), j++ {
+            s = "bah."+functionsCalled[j]+"=function(){if(arguments.length==0){__bah_trigger_block(\""+functionsCalled[j]+"\");return;}let args=[];for(var i=0;i<arguments.length;i++){args.push(arguments[i]);}__bah_trigger_block_arg(\""+functionsCalled[j]+"\",args);};"
+
+            i=0; for i < len(s), i++ {
+                bytes[len(bytes)] = s[i]
+            }
+        }
+
+        i=0; for i < len("</script>"), i++ {
+            bytes[len(bytes)] = "</script>"[i]
+        }
+
+        if len(allCode) != 0 {
+            this.hasCode = true
+
+            allCode = "
+            __javel_output_buffer []byte
+            __javel_client ptr
+            #define __javel3_eval_func(cli ptr, s str)
+
+            eval(s str) {
+                __javel3_eval_func(__javel_client, s)
+            }
+            
+            echo(s str) {
+                i=0; for i < len(s), i++ {
+                    __javel_output_buffer[len(__javel_output_buffer)] = s[i]
+                }
+            }
+            " + allCode
+
+            this.jitObj = jitCompileWithContext(allCode, jitContext {
+                includes: []str {
+                    "/opt/bah-asm/http.bah",
+                    "/opt/bah-asm/json.bah"
+                }
+                wrapFunctions: functionsCalled
+            })
+            if this.jitObj.succeeded == false {
+                oBody = this.body
+                this.body = new javel3_templateElement {
+                    type: JAVEL3_templateTypeBytes
+                    contents: strToArr("Error compiling Bah code: "+this.jitObj.error)
+                }
+                this.jitObj.close()
+            }
+        } else {
+            this.hasCode = false
+        }
+
+    }
+
+    execute(req http_request*, resp http_response*) []byte {
+        res = []byte
+        if this.jitObj.succeeded == false {
+            currElem = this.body
+            for currElem != null, currElem = currElem.next {
+                if currElem.type == JAVEL3_templateTypeBytes {
+                    bytes = <[]byte>currElem.contents
+                    i=0; for i < len(bytes), i++ {
+                        res[len(res)] = bytes[i]
+                    }
+                }
+            }
+            return res
+        }
+
+        clientJitContext jitObject
+        client javel3_streamClient*
+
+        if this.hasCode {
+            clientJitContext = this.jitObj.dup()
+            outputBuff = <Bah_Array_Type**>clientJitContext.getSymbol("__javel_output_buffer")
+            *outputBuff = <Bah_Array_Type*>res
+        }
+
+        currElem = this.body
+        for currElem != null, currElem = currElem.next {
+            if currElem.type == JAVEL3_templateTypeBytes {
+                bytes = <[]byte>currElem.contents
+                i=0; for i < len(bytes), i++ {
+                    res[len(res)] = bytes[i]
+                }
+            } else if currElem.type == JAVEL3_templateTypeCode {
+                blockName = <str>currElem.contents
+                testStr = <ptr*>clientJitContext.getSymbol("prefixStr")
+                fn = <function(http_request*, http_response*)> clientJitContext.getSymbol(blockName)
+                fn(req, resp)
+            }
+        }
+
+        if this.hasCode {
+            client = __javel3_abstract_newClient(this.server)
+            client.jitObj = clientJitContext
+            resp.setHeader("Set-cookie", "javel-stream-key="+client.key+"; Max-Age=315360000; Path=/")
+            jclient = <ptr*>clientJitContext.getSymbol("__javel_client")
+            *jclient = client
+            async __javel3_clientConnectionCooldown(this.server, client)
+        }
+
+        return res
+    }
+
+}
+
+__javel3_constructJSTemplate(code str, functionsCalled []str) {
+    tokens = lexer(code, true)
+    i=0; for i < len(tokens) - 4, i++ {
+        if tokens[i].cont == "bah" && tokens[i+1].cont == "." && tokens[i+2].type == TOKEN_TYPE_VAR {
+            functionsCalled[len(functionsCalled)] = tokens[i+2].cont
+        }
+    }
+}
+
+__javel3_constructHtmlTemplate(elem htmlElement*, functionsCalled []str, allCode str, template javel3_template*, lastElement javel3_templateElement*) [str, javel3_templateElement*] {
+    eName = elem.getName()
+    if eName == "script" {
+        if elem.getAttr("type") == "bah" {
+            allCode += elem.getText()
+            return [allCode, lastElement]
+        } else {
+            __javel3_constructJSTemplate(elem.getText(), functionsCalled)
+        }
+    } else if eName == "embed" {
+        templateElem = new javel3_templateElement {
+            type: JAVEL3_templateTypeCode
+        }
+        blockName = "__javel_run_body_"+uintToStr(len(allCode))
+
+        templateElem.contents = blockName
+
+        allCode += blockName+"(request http_request*, response http_response*) {\n" + elem.getAttr("src") + "\n}"
+
+        if lastElement == null {
+            template.body = templateElem
+        } else {
+            lastElement.next = templateElem
+        }
+        lastElement = templateElem
+
+        return [allCode, lastElement]
+    }
+
+    if lastElement == null {
+        template.body = new javel3_templateElement {
+            type: JAVEL3_templateTypeBytes
+        }
+        lastElement = template.body
+        bytes = []byte
+        lastElement.contents = bytes
+    } else if lastElement.type != JAVEL3_templateTypeBytes {
+        lastElement.next = new javel3_templateElement {
+            type: JAVEL3_templateTypeBytes
+        }
+        lastElement = lastElement.next
+        bytes = []byte
+        lastElement.contents = bytes
+    }
+
+    bytes = <[]byte>lastElement.contents
+
+    if len(eName) == 0 {
+        txt = elem.getText()
+        i=0; for i < len(txt), i++ {
+            bytes[len(bytes)] = txt[i]
+        }
+        return [allCode, lastElement]
+    }
+
+    i=0; for i < len(elem.attrs), i++ {
+        attr = elem.attrs[i]
+        if strHasPrefix(attr, "on") {
+            j=0; for j < len(attr), j++ {
+                if attr[j] == '=' {
+                    break
+                }
+            }
+            attrCode = ""
+            if attr[j+1] == '"' || attr[j+1] == <char>39 {
+                attrCode = attr[j+2:len(attr)-1]
+            } else {
+                attrCode = attr[j+1:]
+            }
+
+            if len(attrCode) != 0 {
+                __javel3_constructJSTemplate(attrCode, functionsCalled)
+            }
+        }
+    }
+
+    bytes[len(bytes)] = '<'
+    i=0; for i < len(eName), i++ {
+        bytes[len(bytes)] = eName[i]
+    }
+
+    i=0; for i < len(elem.attrs), i++ {
+        attr = elem.attrs[i]
+        bytes[len(bytes)] = ' '
+        j=0; for j < len(attr), j++ {
+            bytes[len(bytes)] = attr[j]
+        }
+    }
+
+    if eName in HTML_nonClosingTags {
+        bytes[len(bytes)] = '/'
+        bytes[len(bytes)] = '>'
+        return [allCode, lastElement]
+    }
+
+    bytes[len(bytes)] = '>'
+
+    txt = elem.getText()
+
+    if len(elem.children) == 0 {
+        i=0; for i < len(txt), i++ {
+            bytes[len(bytes)] = txt[i]
+        }
+    } else {
+        i=0; for i < len(elem.children), i++ {
+            res = __javel3_constructHtmlTemplate(elem.children[i], functionsCalled, allCode, template, lastElement)
+            allCode = res[0]
+            lastElement = res[1]
+        }
+    }
+
+
+    if lastElement.type != JAVEL3_templateTypeBytes {
+        lastElement.next = new javel3_templateElement {
+            type: JAVEL3_templateTypeBytes
+        }
+        lastElement = lastElement.next
+        bytes = []byte
+        lastElement.contents = bytes
+    }
+
+    bytes = <[]byte>lastElement.contents
+
+    bytes[len(bytes)] = '<'
+    bytes[len(bytes)] = '/'
+    i=0; for i < len(eName), i++ {
+        bytes[len(bytes)] = eName[i]
+    }
+    bytes[len(bytes)] = '>'
+
+    return [allCode, lastElement]
+}
+
+#define __javel3_findTemplate(server ptr, file []byte, path str, req http_request*) javel3_template*

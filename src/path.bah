@@ -1,0 +1,37 @@
+#import "http.bah"
+
+javel3_parsePath(path str, resp http_response*) str {
+    if strHasSuffix(path, "/") {
+        path += "index.html"
+    } else if strCount(path, ".") == 0 {
+        path += ".html"
+    }
+
+    if strHasSuffix(path, ".html") {
+        resp.setHeader("content-type", "text/html")        
+    } else if strHasSuffix(path, ".css") {
+        resp.setHeader("content-type", "text/css")        
+    } else if strHasSuffix(path, ".js") {
+        resp.setHeader("content-type", "text/javascript")        
+    } else if strHasSuffix(path, ".json") {
+        resp.setHeader("content-type", "application/json")        
+    } else if strHasSuffix(path, ".png") {
+        resp.setHeader("content-type", "image/png")        
+    } else if strHasSuffix(path, ".jpeg") {
+        resp.setHeader("content-type", "image/jpeg")        
+    } else if strHasSuffix(path, ".mov") {
+        resp.setHeader("content-type", "video/mov")        
+    } else if strHasSuffix(path, ".mp4") {
+        resp.setHeader("content-type", "video/mp4")        
+    } else if strHasSuffix(path, ".wasm") {
+        resp.setHeader("content-type", "application/wasm")        
+    } else if strHasSuffix(path, ".flac") {
+        resp.setHeader("content-type", "audio/flac")        
+    } else if strHasSuffix(path, ".wav") {
+        resp.setHeader("content-type", "audio/wave")        
+    } else if strHasSuffix(path, ".gif") {
+        resp.setHeader("content-type", "image/gif")        
+    }
+
+    return path
+}
