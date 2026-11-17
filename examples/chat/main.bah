@@ -1,0 +1,87 @@
+#import "rand.bah"
+
+#import "../../javel3.bah" //import javel3 library
+
+#import "./definitions.bah" //struct chatMessage
+
+server javel3
+
+//Called by sendMessage() inside index.html
+serverDistributeMessage(msg chatMessage) {
+    //for each client, execute the following lambda
+    server.forEachClient(function(s javel3*, cli javel3_streamClient*, msg chatMessage*) {
+        isFromMe = "false"
+
+        //get the global variable 'name' declared inside index.html
+        name = <str*>cli.jitObj.getSymbol("name")
+        if name == null {
+            return
+        }
+
+        if *name == msg.author {
+            isFromMe = "true"
+        }
+        //call the javascript function addNewMessage() inside the client's browser
+        cli.eval("addNewMessage("+toJson(msg)+", "+isFromMe+")")
+    }, &msg)
+}
+
+main(args []str) int {
+
+    //declare the web server
+    server = javel3 {
+        port: 8080
+
+        //Here are the routes the server will accept.
+        routes: []javel3_route* {
+            //This route makes the content of the folder './pages' accessible on the '/' url
+            //By default, this will parse templates such as 'index.html'. This is needed to have <script type="bah"> but can be disabled with 'disableParsing: true'.
+            new javel3_route {
+                path: "/"
+                base: "./pages"
+            }
+        }
+
+        //When a new client joins, this lambda will be called.
+        //A new client is created everytime someone loads an url going to a template file containing code.
+        //In this example, a new client is created everytime someone goes to index.html
+        onClientStart: (s javel3*, client javel3_streamClient*) {
+            //get the 'name' global variable declared inside the bah script in index.html
+            name = <str*>client.jitObj.getSymbol("name")
+            if name == null {
+                return
+            }
+            //Set its content to a random user name
+            *name = "User"+intToStr(randomInRange(0, 99999))
+
+            //Distribute a welcome message to every other users
+            serverDistributeMessage(chatMessage {
+                author: "Server"
+                msg: "Say welcome to "+(*name)+"!"
+            })
+        }
+
+        //This lambda is called when the connection to a client ends.
+        //This means that the user has closed the page or lost connection.
+        onClientEnd: (s javel3*, client javel3_streamClient*) {
+            //Get the client's username
+            name = <str*>client.jitObj.getSymbol("name")
+            if name == null {
+                return
+            }
+            //Tell other clients that we have lost a user.
+            serverDistributeMessage(chatMessage {
+                author: "Server"
+                msg: "Lost "+(*name)+"!"
+            })
+        }
+    }
+
+    println("Launching server on http://localhost:"+intToStr(server.port))
+
+    //Launching the server, this will block this thread.
+    //This function will return only if the server is stopped or launching failed.
+    server.launch()
+
+    return 0
+}

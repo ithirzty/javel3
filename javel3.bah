@@ -24,6 +24,20 @@ struct javel3 extend http_server {
     clientsMutex: mutex
     clients: []javel3_streamClient*
 
+    onClientStart: function(javel3*, javel3_streamClient*)
+    onClientEnd: function(javel3*, javel3_streamClient*)
+
+    forEachClient(callback function(javel3*, javel3_streamClient*, ptr), arg ptr) {
+        this.clientsMutex.lock()
+        i=0; for i < len(this.clients), i++ {
+            if this.clients[i].status != 1 {
+                continue
+            }
+            callback(this, this.clients[i], arg)
+        }
+        this.clientsMutex.unlock()
+    }
+
     getEventClient(key str) javel3_streamClient* {
         this.clientsMutex.lock()
         i=0; for i < len(this.clients), i++ {
@@ -50,7 +64,6 @@ struct javel3 extend http_server {
         i=0; for i < len(this.clients), i++ {
             if client == this.clients[i] {
                 this.clients[i].channel.destroy()
-                this.clients[i].mut.destroy()
                 delete(this.clients, i)
                 break
             }
@@ -139,16 +152,16 @@ __javel3_findTemplate(server javel3*, file []byte, path str, req http_request*) 
 }
 
 javel3_streamHandle(r javel3_route*, req http_request*, resp http_response*) {
-    client = (<javel3*>r.server).getEventClient(req.getCookie("javel-stream-key"))
-
-    if client == null {
-        resp.code = 400
-        resp.write("Malformed request.")
-        resp.send()
-        return
-    }
-
     if req.path == "/__JAVEL/triggerBlock" {
+        client = (<javel3*>r.server).getEventClient(req.getHeader("javel-stream-key"))
+
+        if client == null {
+            resp.code = 400
+            resp.write("Malformed request.")
+            resp.send()
+            return
+        }
+
         method = req.body.str()
 
         if len(method) == 0 {
@@ -171,6 +184,16 @@ javel3_streamHandle(r javel3_route*, req http_request*, resp http_response*) {
     }
 
     if req.path == "/__JAVEL/triggerBlockWithArg" {
+        client = (<javel3*>r.server).getEventClient(req.getHeader("javel-stream-key"))
+
+        if client == null {
+            resp.code = 400
+            resp.write("Malformed request.")
+            resp.send()
+            return
+        }
+
+
         body = req.body.str()
         method = ""
         args jsonElement*
@@ -252,14 +275,32 @@ javel3_streamHandle(r javel3_route*, req http_request*, resp http_response*) {
 
     if req.path == "/__JAVEL/stream" {
 
+        client = (<javel3*>r.server).getEventClient(req.getCookie("javel-stream-key"))
+
+        if client == null {
+            resp.code = 400
+            resp.write("Malformed request.")
+            resp.send()
+            return
+        }
+
+        j3 = <javel3*>r.server
+
+        j3.clientsMutex.lock()
+        if client.status != 0 {
+            j3.clientsMutex.unlock()
+            resp.code = 400
+            resp.write("Client already connected.")
+            resp.send()
+            return
+        }
+        client.status = 1
+        j3.clientsMutex.unlock()
+
         resp.setHeader("Content-type", "text/event-stream")
         resp.setHeader("X-Accel-Buffering", "no")
         resp.write("\n\n")
         resp.send()
-
-        client.mut.lock()
-        client.active = true
-        client.mut.unlock()
 
         for true {
             evt = <str>client.channel.receiveTimedout(5000000000)
@@ -275,28 +316,40 @@ javel3_streamHandle(r javel3_route*, req http_request*, resp http_response*) {
                 break
             }
         }
-        client.mut.lock()
-        client.active = false
-        client.jitObj.close()
-        client.mut.unlock()
-        (<javel3*>r.server).removeStreamClient(client)
+        j3.clientsMutex.lock()
+        client.status = 0
+        j3.clientsMutex.unlock()
+        
+        __javel3_clientConnectionCooldown(r.server, client)
     }
 }
 
-__javel3_abstract_newClient(s javel3*) javel3_streamClient* {
-    return s.newStreamClient()
+__javel3_abstract_newClient(s javel3*, jitObj jitObject) javel3_streamClient* {
+    c = s.newStreamClient()
+    c.jitObj = jitObj
+
+    if s.onClientStart != null {
+        s.onClientStart(c)
+    }
+
+    return c
 }
 
 __javel3_clientConnectionCooldown(server javel3*, client javel3_streamClient*) {
     sleep(5)
-    client.mut.lock()
-    if client.active == false {
+    server.clientsMutex.lock()
+    if client.status == 0 {
+        client.status = 2
+        server.clientsMutex.unlock()
+
+        if server.onClientEnd != null {
+            server.onClientEnd(client)
+        }
         client.jitObj.close()
-        client.mut.unlock()
         server.removeStreamClient(client)
         return
     }
-    client.mut.unlock()
+    server.clientsMutex.unlock()
 }
 
 __javel3_segfaultHandle(sig int32, info ptr, ctx ptr) {

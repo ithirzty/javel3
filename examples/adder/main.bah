@@ -1,4 +1,4 @@
-#import "../javel3.bah"
+#import "../../javel3.bah"
 
 main(args []str) int {
 

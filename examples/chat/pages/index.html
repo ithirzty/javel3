@@ -1,0 +1,151 @@
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Web chat</title>
+
+    <script type="bah">
+        //This code is executed on the server.
+        //The client cannot access this code.
+        //Only 'bah.sendMessage()' is exposed to the client as a javascript binding.
+
+        #import "./definitions.bah" //definitions used by both this code and main.bah
+        
+        name = "" //main.bah sets this global variable to the random username
+
+        //Called by javascript when sending a message.
+        sendMessage(s str) {
+            if len(s) == 0 {
+                return
+            }
+
+            //distribute the message to all clients (function defined in main.bah)
+            serverDistributeMessage(chatMessage {
+                author: name
+                msg: s
+            })
+
+            //clear the input on success
+            eval("msgInput.value = \"\"")
+        }
+    </script>
+
+    <style>
+        div.msg {
+            padding: 10;
+            border-radius: 6px;
+            background-color: #4BDA54;
+            border: solid 1px #37A03E;
+            width: fit-content;
+            margin-right: auto;
+            margin-bottom: 10px;
+            box-shadow: 1px 2px 10px #4BDA5478;
+        }
+
+        div.msg.me {
+            background-color: #4BA4DA;
+            border: solid 1px #2D8478;
+            margin-left: auto;
+            margin-right: 0;
+            box-shadow: -1px 2px 10px #4ba4da78;
+        }
+
+        div.msg.announcement {
+            background-color: #DAC44B;
+            border: solid 1px #A06D37;
+            box-shadow: 0px 2px 10px #DAC44B78;
+            margin-left: auto;
+        }
+
+        #messages {
+            width: 100%;
+            height: calc(100vh - 60px);
+            overflow-y: auto;
+            border-radius: 6px;
+        }
+
+        #inputbar {
+            width: calc(100% - 10px);
+            height: 32px;
+            background-color: #9ec9e3;
+            margin-bottom: 10px;
+            border-radius: 6px;
+            padding: 5px;
+            box-shadow: 0px -2px 5px #4ba4da45;
+        }
+        
+        #inputbar input {
+            width: calc(100% - 50px);
+            height: 100%;
+        }
+
+        #inputbar button {
+            width: 45px;
+            margin-left: 5px;
+            height: 100%;
+            cursor: pointer;
+        }
+
+    </style>
+</head>
+<body>
+    
+    <!-- The messages list -->
+    <div id="messages"></div>
+
+    <!-- The input area to type a new message -->
+    <div id="inputbar">
+        <input type="text" placeholder="Your message" id="msgInput">
+        <button onclick="bah.sendMessage(msgInput.value)">Send</button>
+    </div>
+
+    <script>
+
+        //call bah.sendMessage() when typing the enter key inside the input
+        window.onload = () => {
+            msgInput.addEventListener("keydown", (evt) => {
+                if (evt.key == "Enter") {
+                    bah.sendMessage(msgInput.value)
+                }
+            })
+        }
+
+        //function to display a new message in the #messages div
+        //this is triggered by the server when a new message comes inside main.bah -> 'serverDistributeMessage()'
+        function addNewMessage(chatMsg, fromMe) {
+            //construct the new html element
+            //Using sub elements with .innerText to escape potential html
+            authorTxt = document.createElement("span")
+            authorTxt.classList.add("author")
+            authorTxt.innerText = chatMsg.author+": "
+            msgTxt = document.createElement("span")
+            msgTxt.classList.add("msgTxt")
+            msgTxt.innerText = chatMsg.msg
+            msgDiv = document.createElement("div")
+            msgDiv.classList.add("msg")
+
+            //if message is sent by the client, make it blue
+            if (fromMe) {
+                msgDiv.classList.add("me")
+            } else if (chatMsg.author == "Server") {
+                msgDiv.classList.add("announcement")
+            }
+
+            msgDiv.appendChild(authorTxt)
+            msgDiv.appendChild(msgTxt)
+
+            //is the message list sctolled to the bottom ?
+            let wasSrolledToBottom = (messages.scrollTop == messages.scrollTopMax)
+
+            //add the message to the message list
+            messages.appendChild(msgDiv)
+
+            //if the list was scrolled all the way, scroll to the bottom to display the new msg
+            if (wasSrolledToBottom) {
+                messages.scrollTop = messages.scrollTopMax
+            }
+        }
+
+    </script>
+</body>
+</html>

@@ -37,6 +37,10 @@ By default, any route with de default handle and .disableParsing set to false, w
 
 Template files allow you to mix client side Javascript and server side Bah inside the same file. Anycode that is executed server side cannot be seen by the client.
 
+Anytime the template file is saved, the Javel3 server will automaticaly recompile it. This enables you to make hotfixes to dynamic webpages without restarting or recompiling the server. Note that this uses the JIT compiler, if you #define any function declared inside your bah project, you will be able to call it.
+
+For the jit compiler and the templating system to work, the `/opt/bah-asm/` bah libraries must be present on the system.  
+
 There is three way of insertting Bah code:
 - `<script type="bah"> your bah code </script>`<br/>
     Useful to include files or declare functions / global variables.

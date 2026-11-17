@@ -30,26 +30,30 @@ __javel3_makeToken() str {
     return token.str()
 }
 
+struct javel3_streamMessageEvaluate {
+    code: str
+}
+
 struct javel3_streamClient {
     key: str
     channel: channel*
-    mut: mutex
     jitObj: jitObject
-    active: bool
+    status: byte //0: not connected, 1: connected, 2: removed
 
     _init() {
         this.key = __javel3_makeToken()
-        this.mut.init()
         this.channel = channel()
     }
 
     send(e reflectElement) {
         this.channel.send("event: "+e.type+"\ndata:"+toJson(e)+"\n\n")
     }
-}
 
-struct javel3_streamMessageEvaluate {
-    code: str
+    eval(code str) {
+        this.send(javel3_streamMessageEvaluate{
+            code: code
+        })
+    }
 }
 
 __javel3_eval_func(cli javel3_streamClient*, s str) {

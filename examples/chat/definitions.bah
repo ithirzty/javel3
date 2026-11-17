@@ -1,0 +1,6 @@
+struct chatMessage {
+    author: str
+    msg: str
+}
+
+#define serverDistributeMessage(msg chatMessage)

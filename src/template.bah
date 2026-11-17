@@ -7,12 +7,12 @@
 
 #import "./streams.bah"
 
-#define __javel3_abstract_newClient(s http_server*) javel3_streamClient*
+#define __javel3_abstract_newClient(s http_server*, jitObj jitObject) javel3_streamClient*
 
 const JAVEL3_templateTypeBytes   = 0
 const JAVEL3_templateTypeCode    = 1
 
-const __javel3_clientScriptInjection = "function __bah_trigger_block_arg(e,a){fetch(window.location.origin+\"/__JAVEL/triggerBlockWithArg\",{method:\"POST\",body:e+\"&\"+JSON.stringify(a),credentials:\"same-origin\"})}function __bah_trigger_block(e,a){fetch(window.location.origin+\"/__JAVEL/triggerBlock\",{method:\"POST\",body:e,credentials:\"same-origin\"})}let __javel_es=new EventSource(window.origin+\"/__JAVEL/stream\");__javel_es.addEventListener(\"javel3_streamMessageEvaluate\",ev=>{let data=JSON.parse(ev.data);eval(data.code)});let bah = {};"
+const __javel3_clientScriptInjection = "function getCookie(c_name) {var c_value = \" \" + document.cookie;var c_start = c_value.indexOf(\" \" + c_name + \"=\");if (c_start == -1) {c_value = null;} else {c_start = c_value.indexOf(\"=\", c_start) + 1;var c_end = c_value.indexOf(\";\", c_start);if (c_end == -1) {c_end = c_value.length;};c_value = unescape(c_value.substring(c_start,c_end));};return c_value;};var __javel_credentials=getCookie(\"javel-stream-key\");function __bah_trigger_block_arg(e, a) { fetch(window.location.origin + \"/__JAVEL/triggerBlockWithArg\", { method: \"POST\", body: e + \"&\" + JSON.stringify(a), credentials: \"same-origin\", headers: {\"javel-stream-key\":__javel_credentials} }) } function __bah_trigger_block(e, a) { fetch(window.location.origin + \"/__JAVEL/triggerBlock\", { method: \"POST\", body: e, credentials: \"same-origin\", headers: {\"javel-stream-key\":__javel_credentials} }) } let __javel_es = new EventSource(window.origin + \"/__JAVEL/stream\"); __javel_es.addEventListener(\"javel3_streamMessageEvaluate\", ev => { let data = JSON.parse(ev.data); eval(data.code) }); let bah = {};"
 
 struct javel3_templateElement {
     contents: ptr
@@ -180,8 +180,7 @@ struct javel3_template {
         }
 
         if this.hasCode {
-            client = __javel3_abstract_newClient(this.server)
-            client.jitObj = clientJitContext
+            client = __javel3_abstract_newClient(this.server, clientJitContext)
             resp.setHeader("Set-cookie", "javel-stream-key="+client.key+"; Max-Age=315360000; Path=/")
             jclient = <ptr*>clientJitContext.getSymbol("__javel_client")
             *jclient = client
