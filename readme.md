@@ -68,7 +68,6 @@ The following example will let you update a variable `nb` by the value of the `a
 </head>
 <body>
     <script type="bah">
-        #import "time.bah"
         nb = 0
 
         prefixStr = "Score: "
