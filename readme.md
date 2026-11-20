@@ -48,7 +48,7 @@ There is three way of insertting Bah code:
     Useful to execute bah code inline Anything that is `echo()`ed isnisd here will be rendered in place (as would php do). The code is treated as a function body.
     Inside and embed statement, you can use `request` and `response` to access the http_request and http_response of the current connection.
 - `bah.myFunction()` inside your javascript code.
-    Note that any js argument used when calling the function will be converted to the arguments of the Bah function definition. Any function that is called inside the javascript code will be exposed to the client as a javascript binding. 
+    Note that any js argument used when calling the function will be converted to the arguments of the Bah function definition. Any function that is called inside the javascript code will be exposed to the client as a javascript binding. If you need to get the return value of the bah function, the javascipt binding returns a promise : `let myReturnValue = await bah.myFunction()` or `bah.myFunction().then(myReturnValue=>{ ... })`
     
     **Note that if a function is not called inside the static html page, it will not be exposed.**
 

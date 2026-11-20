@@ -12,7 +12,7 @@
 const JAVEL3_templateTypeBytes   = 0
 const JAVEL3_templateTypeCode    = 1
 
-const __javel3_clientScriptInjection = "function getCookie(c_name) {var c_value = \" \" + document.cookie;var c_start = c_value.indexOf(\" \" + c_name + \"=\");if (c_start == -1) {c_value = null;} else {c_start = c_value.indexOf(\"=\", c_start) + 1;var c_end = c_value.indexOf(\";\", c_start);if (c_end == -1) {c_end = c_value.length;};c_value = unescape(c_value.substring(c_start,c_end));};return c_value;};var __javel_credentials=getCookie(\"javel-stream-key\");function __bah_trigger_block_arg(e, a) { fetch(window.location.origin + \"/__JAVEL/triggerBlockWithArg\", { method: \"POST\", body: e + \"&\" + JSON.stringify(a), credentials: \"same-origin\", headers: {\"javel-stream-key\":__javel_credentials} }) } function __bah_trigger_block(e, a) { fetch(window.location.origin + \"/__JAVEL/triggerBlock\", { method: \"POST\", body: e, credentials: \"same-origin\", headers: {\"javel-stream-key\":__javel_credentials} }) } let __javel_es = new EventSource(window.origin + \"/__JAVEL/stream\"); __javel_es.addEventListener(\"javel3_streamMessageEvaluate\", ev => { let data = JSON.parse(ev.data); eval(data.code) }); let bah = {};"
+const __javel3_clientScriptInjection = "function getCookie(c_name) {var c_value = \" \" + document.cookie;var c_start = c_value.indexOf(\" \" + c_name + \"=\");if (c_start == -1) {c_value = null;} else {c_start = c_value.indexOf(\"=\", c_start) + 1;var c_end = c_value.indexOf(\";\", c_start);if (c_end == -1) {c_end = c_value.length;};c_value = unescape(c_value.substring(c_start,c_end));};return c_value;};var __javel_credentials=getCookie(\"javel-stream-key\");async function __bah_trigger_block_arg(e, a) { return (await fetch(window.location.origin + \"/__JAVEL/triggerBlockWithArg\", { method: \"POST\", body: e + \"&\" + JSON.stringify(a), credentials: \"same-origin\", headers: {\"javel-stream-key\":__javel_credentials} })).json() } async function __bah_trigger_block(e, a) { return (await fetch(window.location.origin + \"/__JAVEL/triggerBlock\", { method: \"POST\", body: e, credentials: \"same-origin\", headers: {\"javel-stream-key\":__javel_credentials} })).json() } let __javel_es = new EventSource(window.origin + \"/__JAVEL/stream\"); __javel_es.addEventListener(\"javel3_streamMessageEvaluate\", ev => { let data = JSON.parse(ev.data); eval(data.code) }); let bah = {};"
 
 struct javel3_templateElement {
     contents: ptr
@@ -35,14 +35,8 @@ struct javel3_template {
     jitObj: jitObject
     hasCode: bool
 
-    cleanup() {
-        if len(this.jitObj.filePath) != 0 {
-            this.jitObj.close()
-        }
-    }
-    
     parse(bytes []byte, filePath str) {
-        this.cleanup()
+        this.jitObj.close()
         
         blockNb = 0
 
@@ -89,7 +83,7 @@ struct javel3_template {
         }
 
         j=0; for j < len(functionsCalled), j++ {
-            s = "bah."+functionsCalled[j]+"=function(){if(arguments.length==0){__bah_trigger_block(\""+functionsCalled[j]+"\");return;}let args=[];for(var i=0;i<arguments.length;i++){args.push(arguments[i]);}__bah_trigger_block_arg(\""+functionsCalled[j]+"\",args);};"
+            s = "bah."+functionsCalled[j]+"=async function(){if(arguments.length==0){return await __bah_trigger_block(\""+functionsCalled[j]+"\");}let args=[];for(var i=0;i<arguments.length;i++){args.push(arguments[i]);}return await __bah_trigger_block_arg(\""+functionsCalled[j]+"\",args);};"
 
             i=0; for i < len(s), i++ {
                 bytes[len(bytes)] = s[i]
@@ -194,7 +188,7 @@ struct javel3_template {
 
 __javel3_constructJSTemplate(code str, functionsCalled []str) {
     tokens = lexer(code, true)
-    i=0; for i < len(tokens) - 4, i++ {
+    i=0; for i < len(tokens) - 2, i++ {
         if tokens[i].cont == "bah" && tokens[i+1].cont == "." && tokens[i+2].type == TOKEN_TYPE_VAR {
             functionsCalled[len(functionsCalled)] = tokens[i+2].cont
         }

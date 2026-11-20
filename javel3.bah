@@ -171,14 +171,37 @@ javel3_streamHandle(r javel3_route*, req http_request*, resp http_response*) {
             return
         }
 
-        if client.jitObj.call(method, null) == false {
+        fn bahFunction*
+        i=0; for i < len(client.jitObj.functions), i++ {
+            fn = client.jitObj.functions[i]
+            if fn.name == method {
+                break
+            }
+        }
+
+        retPtr = null
+        if fn.type.ret != null {
+            retPtr = memoryAlloc(fn.type.ret.size)
+        }
+
+        if client.jitObj.call(method, null, retPtr) == false {
             resp.write("Unknown method.")
             resp.code = 404
             resp.send()
             return
         }
 
-        resp.write("")
+        resp.setHeader("Content-type", "application/json")
+        if fn.type.ret != null {
+            retElem = jitReflect(fn.type.ret)
+            retElem.value = retPtr
+            if fn.type.ret.type == BAH_TYPE_STR {
+                retElem.type = "str*"
+            }
+            resp.write(toJson(*retElem))
+        } else {
+            resp.write("null")
+        }
         resp.send()
         return
     }
@@ -252,23 +275,48 @@ javel3_streamHandle(r javel3_route*, req http_request*, resp http_response*) {
             arg = args.children[i]
             reflectElem = jitReflect(currArg)
             val = <ptr>(<uint>buff + offset)
-            if currArg.type == BAH_TYPE_STR {
+            if currArg.type == BAH_TYPE_ARRAY {
+                *(<ptr*>val) = new Bah_Array_Type {
+                    elemSize: reflectElem.arrayElem.size
+                }
+                reflectElem.value = *<ptr*>val
+            } else if currArg.type == BAH_TYPE_STR {
                 reflectElem.type = "str*"
+                reflectElem.value = val
+            } else {
+                reflectElem.value = val
             }
-            reflectElem.value = val
             arg.scan(*reflectElem)
             i++
             offset += currArg.size
         }
 
-        if client.jitObj.call(method, buff) == false {
+        retPtr = null
+        if fn.type.ret != null {
+            retPtr = memoryAlloc(fn.type.ret.size)
+        }
+
+        if client.jitObj.call(method, buff, retPtr) == false {
             resp.write("Unknown method.")
             resp.code = 404
             resp.send()
             return
         }
+
+        resp.setHeader("Content-type", "application/json")
+        if fn.type.ret != null {
+            retElem = jitReflect(fn.type.ret)
+            retElem.value = retPtr
+            if fn.type.ret.type == BAH_TYPE_STR {
+                retElem.type = "str*"
+            } else if fn.type.ret.type == BAH_TYPE_ARRAY {
+                retElem.value = *<ptr*>retPtr
+            }
+            resp.write(toJson(*retElem))
+        } else {
+            resp.write("null")
+        }
         
-        resp.write("")
         resp.send()
         return
     }
